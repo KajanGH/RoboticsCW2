@@ -73,13 +73,36 @@ class YoubotKinematicStudent(YoubotKinematicBase):
 
         # Your code starts here ----------------------------
 
-        # For your solution to match the KDL Jacobian, z0 needs to be set [0, 0, -1] instead of [0, 0, 1], since that is how its defined in the URDF.
-        # Both are correct.
+        T = np.identity(4)  # Initial transformation matrix
+        p_e = self.forward_kinematics(joint)[:3, 3]  # End-effector position in base frame
+        jacobian = np.zeros((6, 5))  # Initialize Jacobian matrix (6 rows, 5 columns)
         
+        z_prev = np.array([0, 0, -1])  # Base frame z-axis (for revolute joint definitions in KDL)
+        o_prev = np.array([0, 0, 0])  # Base frame origin
+
+        for i in range(5):
+            T = self.forward_kinematics(joint, up_to_joint=i + 1)  # Compute T_0^i
+            z_i = T[:3, 2]  # z-axis of the current frame
+            o_i = T[:3, 3]  # Origin of the current frame
+
+            if self.dh_params['alpha'][i] != 0:  # Check if joint is revolute
+                # Linear velocity component (J_P)
+                jacobian[:3, i] = np.cross(z_prev, p_e - o_prev)
+                # Angular velocity component (J_O)
+                jacobian[3:, i] = z_prev
+            else:  # Prismatic joint
+                # Linear velocity component (J_P)
+                jacobian[:3, i] = z_prev
+                # Angular velocity component (J_O)
+                jacobian[3:, i] = np.zeros(3)
+
+            z_prev = z_i
+            o_prev = o_i
         # Your code ends here ------------------------------
 
         assert jacobian.shape == (6, 5)
-        return jacobian
+        return jacobian 
+
 
     def check_singularity(self, joint):
         """Check for singularity condition given robot joints. Coursework 2 Question 4c.
@@ -96,6 +119,11 @@ class YoubotKinematicStudent(YoubotKinematicBase):
         assert len(joint) == 5
         
         # Your code starts here ----------------------------
+        # Compute the Jacobian matrix
+        jacobian = self.get_jacobian(joint)
+
+        # Check the rank of the Jacobian matrix
+        singularity = np.linalg.matrix_rank(jacobian) < min(jacobian.shape)
 
         # Your code ends here ------------------------------
 
