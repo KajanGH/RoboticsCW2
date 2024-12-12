@@ -73,27 +73,24 @@ class YoubotKinematicStudent(YoubotKinematicBase):
 
         # Your code starts here ----------------------------
 
-        T = np.identity(4)  # Initial transformation matrix
-        p_e = self.forward_kinematics(joint)[:3, 3]  # End-effector position in base frame
-        jacobian = np.zeros((6, 5))  # Initialize Jacobian matrix (6 rows, 5 columns)
+        T = np.identity(4) 
+        p_e = self.forward_kinematics(joint)[:3, 3]  
+        jacobian = np.zeros((6, 5))  
         
-        z_prev = np.array([0, 0, -1])  # Base frame z-axis (for revolute joint definitions in KDL)
-        o_prev = np.array([0, 0, 0])  # Base frame origin
+        z_prev = np.array([0, 0, -1]) 
+        o_prev = np.array([0, 0, 0])
 
         for i in range(5):
-            T = self.forward_kinematics(joint, up_to_joint=i + 1)  # Compute T_0^i
-            z_i = T[:3, 2]  # z-axis of the current frame
-            o_i = T[:3, 3]  # Origin of the current frame
+            T = self.forward_kinematics(joint, up_to_joint=i + 1)
+            z_i = T[:3, 2] 
+            o_i = T[:3, 3]
 
-            if self.dh_params['alpha'][i] != 0:  # Check if joint is revolute
-                # Linear velocity component (J_P)
+            if self.dh_params['alpha'][i] != 0:  
                 jacobian[:3, i] = np.cross(z_prev, p_e - o_prev)
-                # Angular velocity component (J_O)
                 jacobian[3:, i] = z_prev
-            else:  # Prismatic joint
-                # Linear velocity component (J_P)
+            else:
+               
                 jacobian[:3, i] = z_prev
-                # Angular velocity component (J_O)
                 jacobian[3:, i] = np.zeros(3)
 
             z_prev = z_i
@@ -119,12 +116,8 @@ class YoubotKinematicStudent(YoubotKinematicBase):
         assert len(joint) == 5
         
         # Your code starts here ----------------------------
-        # Compute the Jacobian matrix
         jacobian = self.get_jacobian(joint)
-
-        # Check the rank of the Jacobian matrix
         singularity = np.linalg.matrix_rank(jacobian) < min(jacobian.shape)
-
         # Your code ends here ------------------------------
 
         assert isinstance(singularity, bool)
