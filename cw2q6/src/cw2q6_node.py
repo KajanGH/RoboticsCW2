@@ -51,7 +51,18 @@ class YoubotTrajectoryPlanning(object):
         # 5. Create a JointTrajectory message.
 
         # Your code starts here ------------------------------
-
+        target_cart_tf, target_joint_positions = self.load_targets()
+        sorted_order, _ = self.get_shortest_path(target_cart_tf)
+        intermediate_tfs = self.intermediate_tfs(sorted_order, target_cart_tf, num_points=10)
+        init_joint_position = target_joint_positions[:, 0]
+        joint_positions = self.full_checkpoints_to_joints(intermediate_tfs, init_joint_position)
+        
+        traj = JointTrajectory()
+        for i in range(joint_positions.shape[1]):
+            point = JointTrajectoryPoint()
+            point.positions = joint_positions[:, i]
+            point.time_from_start = rospy.Duration(i * 0.1)
+            traj.points.append(point)
         # Your code ends here ------------------------------
 
         assert isinstance(traj, JointTrajectory)
@@ -83,7 +94,11 @@ class YoubotTrajectoryPlanning(object):
         target_cart_tf[:, :, 0] = self.kdl_youbot.forward_kinematics(target_joint_positions[:, 0])
 
         # Your code starts here ------------------------------
-
+        idx = 1
+        for topic, msg, t in bag.read_messages(topics=['target_joint_positions']):
+            target_joint_positions[:, idx] = msg.position
+            target_cart_tf[:, :, idx] = self.kdl_youbot.forward_kinematics(target_joint_positions[:, idx])
+            idx += 1
         # Your code ends here ------------------------------
 
         # Close the bag
@@ -108,7 +123,32 @@ class YoubotTrajectoryPlanning(object):
         """
 
         # Your code starts here ------------------------------
+        def generate_permutations(array):
+            if len(array) == 1:
+                return [array]
+            perms = []
+            for i in range(len(array)):
+                remaining = array[:i] + array[i+1:]
+                for perm in generate_permutations(remaining):
+                    perms.append([array[i]] + perm)
+            return perms
 
+        num_checkpoints = checkpoints_tf.shape[2]
+        checkpoint_indices = list(range(num_checkpoints))
+        min_dist = float('inf')
+        sorted_order = None
+
+        all_permutations = generate_permutations(checkpoint_indices)
+
+        for perm in all_permutations:
+            dist = 0
+            for i in range(len(perm) - 1):
+                p1 = checkpoints_tf[:3, 3, perm[i]]
+                p2 = checkpoints_tf[:3, 3, perm[i + 1]]
+                dist += np.linalg.norm(p1 - p2)
+            if dist < min_dist:
+                min_dist = dist
+                sorted_order = np.array(perm)
         # Your code ends here ------------------------------
 
         assert isinstance(sorted_order, np.ndarray)
@@ -158,7 +198,13 @@ class YoubotTrajectoryPlanning(object):
         """
 
         # Your code starts here ------------------------------
-        
+        full_checkpoint_tfs = []
+        for i in range(len(sorted_checkpoint_idx) - 1):
+            a_tf = target_checkpoint_tfs[:, :, sorted_checkpoint_idx[i]]
+            b_tf = target_checkpoint_tfs[:, :, sorted_checkpoint_idx[i + 1]]
+            tfs = self.decoupled_rot_and_trans(a_tf, b_tf, num_points)
+            full_checkpoint_tfs.append(tfs)
+        full_checkpoint_tfs = np.concatenate(full_checkpoint_tfs, axis=2)
         # Your code ends here ------------------------------
        
         return full_checkpoint_tfs
@@ -176,7 +222,16 @@ class YoubotTrajectoryPlanning(object):
         """
 
         # Your code starts here ------------------------------
-
+        tfs = np.zeros((4, 4, num_points))
+        for i in range(num_points):
+            alpha = i / (num_points - 1)
+            pos = (1 - alpha) * checkpoint_a_tf[:3, 3] + alpha * checkpoint_b_tf[:3, 3]
+            rot_a = PyKDL.Rotation(checkpoint_a_tf[:3, :3])
+            rot_b = PyKDL.Rotation(checkpoint_b_tf[:3, :3])
+            rot = rot_a.Interpolate(rot_b, alpha)
+            tfs[:3, :3, i] = rot
+            tfs[:3, 3, i] = pos
+            tfs[3, :, i] = [0, 0, 0, 1]
         # Your code ends here ------------------------------
 
         return tfs
@@ -194,7 +249,11 @@ class YoubotTrajectoryPlanning(object):
         """
         
         # Your code starts here ------------------------------
-
+        q_checkpoints = np.zeros((5, full_checkpoint_tfs.shape[2]))
+        q = init_joint_position
+        for i in range(full_checkpoint_tfs.shape[2]):
+            q, _ = self.ik_position_only(full_checkpoint_tfs[:, :, i], q)
+            q_checkpoints[:, i] = q
         # Your code ends here ------------------------------
 
         return q_checkpoints
@@ -213,7 +272,16 @@ class YoubotTrajectoryPlanning(object):
         # Jacobian that will affect the position of the error.
 
         # Your code starts here ------------------------------
-        
+        max_iter = 100
+        epsilon = 1e-3
+        q = q0.copy()
+        for _ in range(max_iter):
+            current_pose = self.kdl_youbot.forward_kinematics(q)
+            error = pose[:3, 3] - current_pose[:3, 3]
+            if np.linalg.norm(error) < epsilon:
+                break
+            jacobian = self.kdl_youbot.compute_jacobian(q)[:3, :]
+            q += np.linalg.pinv(jacobian) @ error
         # Your code ends here ------------------------------
 
         return q, error
